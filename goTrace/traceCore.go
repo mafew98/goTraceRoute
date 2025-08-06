@@ -12,8 +12,7 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-var maxHops uint8 = 64 // max 255 hops should be enough.
-const packetSize uint8 = 32
+const packetSize int = 32
 
 var port string = "33444"
 
@@ -36,20 +35,25 @@ type ResponsePacket struct {
 }
 
 // Main driver function that initializes entities and begins the packet transfer
-func TraceRoute(hostname string) {
+func TraceRoute(hostname string, timeout int, maxHops int) {
 	var sender Sender
 	var receiver Receiver
 
-	initializeSender(hostname, &sender)
+	initializeSender(hostname, &sender, maxHops)
 	initializeReceiver(&receiver)
 
 	// Set TTL in connection and serve data
-	var hop uint8
+	var hop int
 	for hop = 1; hop <= maxHops; hop++ {
 		traceByHop(&sender, hop)
-		if listenForReply(&receiver, hop) {
-			log.Println("Reached Host")
-			break
+		hopStart := time.Now()
+		retval := listenForReply(&receiver, hop)
+		rtt := time.Since(hopStart)
+		if retval != 2 {
+			fmt.Printf("    %.3f ms\n", float64(rtt.Nanoseconds())/1e6)
+			if retval == 1 {
+				break
+			}
 		}
 	}
 
@@ -61,7 +65,7 @@ func TraceRoute(hostname string) {
 	}
 }
 
-func initializeSender(hostname string, sender *Sender) {
+func initializeSender(hostname string, sender *Sender, maxHops int) {
 	// Acquiring the first IPv4 address for the given hostname
 	ips, err := net.LookupIP(hostname)
 	if err != nil {
@@ -114,7 +118,7 @@ func initializeReceiver(receiver *Receiver) {
 	receiver.buffer = make([]byte, 1500)
 }
 
-func traceByHop(sender *Sender, hops uint8) {
+func traceByHop(sender *Sender, hops int) {
 	// Setting the TTL for the packet
 	var err error = sender.packetConnector.SetTTL(int(hops))
 	if err != nil {
@@ -134,15 +138,15 @@ func traceByHop(sender *Sender, hops uint8) {
 /*
 Returns false if traceroute hasn't reached the target and true if it has reached the final destination.
 */
-func listenForReply(receiver *Receiver, step uint8) bool {
+func listenForReply(receiver *Receiver, step int) int {
 	for {
 		receiver.icmpListener.SetReadDeadline(time.Now().Add(time.Second))
 		_, addr, err := receiver.icmpListener.ReadFrom(receiver.buffer)
 		if err != nil {
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 				// timeout is expected
-				fmt.Printf("%d * * *\n", step)
-				return false
+				fmt.Printf("%d  * * *\n", step)
+				return 2
 			} else {
 				// non-timeout errors are fatal
 				log.Fatalln(err)
@@ -161,7 +165,11 @@ func listenForReply(receiver *Receiver, step uint8) bool {
 
 		if isValidResponse(responsePacket) {
 			// fmt.Println("Got a valid response")
-			return handleResponse(step, responsePacket)
+			if handleResponse(step, responsePacket) {
+				return 1
+			} else {
+				return 0
+			}
 		} else {
 			continue
 		}
@@ -201,7 +209,7 @@ func isValidResponse(response *ResponsePacket) bool {
 }
 
 // Handles a valid packet response to traceroute and assigns the appropriate actions.
-func handleResponse(step uint8, response *ResponsePacket) bool {
+func handleResponse(step int, response *ResponsePacket) bool {
 	hostArr, err := net.LookupAddr(response.responder.String())
 	var host string
 	if err != nil || len(hostArr) == 0 {
@@ -210,7 +218,7 @@ func handleResponse(step uint8, response *ResponsePacket) bool {
 	} else {
 		host = hostArr[0]
 	}
-	fmt.Printf("%d %v (%v)\n", step, host, response.responder)
+	fmt.Printf("%d  %v (%v)", step, host, response.responder)
 
 	if response.icmpType == 11 && response.icmpCode == 0 {
 		// fmt.Println("TLL Expired detected")
