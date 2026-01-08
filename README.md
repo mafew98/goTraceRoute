@@ -1,6 +1,6 @@
 Project Description:
 -------------------
-Simple reimplementation of the traceroute network diagnostic tool in Go using UDP, ICMP and raw-socket programming (IPv4, TTL traversal, DNS resolution). Current implementation only uses UDP and IPv4.
+Simple reimplementation of the traceroute network diagnostic tool in Go using UDP, ICMP and raw-socket programming (IPv4, TTL traversal, DNS resolution). Current implementation uses UDP and IPv4.
 
 Compilation Instructions:
 ------------------------
